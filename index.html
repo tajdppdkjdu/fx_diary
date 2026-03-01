@@ -1,0 +1,343 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FX デイトレ反省ノート</title>
+  
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <script crossorigin src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+  <script crossorigin src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/localforage/1.10.0/localforage.min.js"></script>
+
+  <style>
+    input, textarea, button, select { font-size: 16px; } 
+    body { -webkit-tap-highlight-color: transparent; }
+  </style>
+</head>
+<body class="bg-slate-50 text-gray-800">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // --- カスタムUIコンポーネント ---
+    const ButtonGroup = ({ label, options, name, value, onChange }) => (
+      <div className="mb-4">
+        <label className="block text-sm font-semibold text-gray-700 mb-2">{label}</label>
+        <div className="flex flex-wrap gap-2">
+          {options.map(opt => (
+            <button
+              key={opt.val || opt} type="button" onClick={() => onChange(name, opt.val || opt)}
+              className={`px-4 py-2 rounded-lg border text-sm font-medium transition-all duration-200 ${
+                value === (opt.val || opt) ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'bg-white text-gray-600 border-gray-300 hover:bg-gray-50'
+              }`}
+            >
+              {opt.label || opt}
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+
+    const CheckboxItem = ({ label, name, checked, onChange }) => (
+      <label className="flex items-start space-x-3 cursor-pointer p-3 border rounded-lg hover:bg-gray-50 mb-2 bg-white transition-colors">
+        <input 
+          type="checkbox" checked={checked} onChange={(e) => onChange(name, e.target.checked)}
+          className="mt-0.5 h-5 w-5 text-blue-600 rounded border-gray-300 focus:ring-blue-500"
+        />
+        <span className="text-gray-700 text-sm leading-tight flex-1">{label}</span>
+      </label>
+    );
+
+    const InputField = ({ label, type = "text", name, value, onChange, placeholder = "", suffix = "", containerClass = "mb-4" }) => (
+      <div className={`w-full ${containerClass}`}>
+        {label && <label className="block text-sm font-semibold text-gray-700 mb-2">{label}</label>}
+        <div className="relative">
+          <input
+            type={type} value={value} onChange={(e) => onChange(name, e.target.value)} placeholder={placeholder}
+            className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none transition-all text-sm bg-white"
+          />
+          {suffix && <span className="absolute right-3 top-1/2 transform -translate-y-1/2 text-gray-500 text-sm pointer-events-none">{suffix}</span>}
+        </div>
+      </div>
+    );
+
+    function App() {
+      const getToday = () => new Date().toISOString().split('T')[0];
+
+      const initialFormState = {
+        date: getToday(), timeStart: '', dateEnd: getToday(), timeEnd: '',
+        holdDays: '', holdHours: '', holdMinutes: '',
+        pair: '', lot: '', side: '買', result: '勝', profit: '', pips: '',
+        dirDaily: '上', dir4h: '上', dir1h: '上',
+        trendType: '順', trendTypeOther: '', wave: '1', waveOther: '', lastPA: '三尊', lastPAOther: '',
+        priceEntry: '', priceSl: '', priceTp: '', riskPips: '', rewardPips: '',
+        reversalReason: '', confidence: '5', images: [],
+        entryTiming: '良',
+        chkSlTp: false, chkActionOther: false, actionOtherText: '',
+        chkCut: false, chkChicken: false, chkGreed: false, chkReversal: false, chkExitOther: false, exitOtherText: '',
+        mental: '3', analysis: '', improvement: '', reviewOtherText: ''
+      };
+
+      const [formData, setFormData] = useState(initialFormState);
+      const [records, setRecords] = useState([]);
+      const [isLoaded, setIsLoaded] = useState(false);
+
+      useEffect(() => {
+        localforage.getItem('fx-trade-records').then(val => {
+          if (val && Array.isArray(val)) setRecords(val);
+          setIsLoaded(true);
+        }).catch(err => console.error(err));
+      }, []);
+
+      useEffect(() => {
+        if (isLoaded) localforage.setItem('fx-trade-records', records).catch(err => console.error(err));
+      }, [records, isLoaded]);
+
+      const handleChange = (name, value) => setFormData(prev => ({ ...prev, [name]: value }));
+
+      const handleImageUpload = (e) => {
+        const files = Array.from(e.target.files);
+        if (files.length === 0) return;
+        const promises = files.map(file => {
+          return new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (event) => {
+              const img = new Image();
+              img.onload = () => {
+                const canvas = document.createElement('canvas');
+                let width = img.width, height = img.height;
+                if (width > height) { if (width > 800) { height *= 800 / width; width = 800; } } 
+                else { if (height > 800) { width *= 800 / height; height = 800; } }
+                canvas.width = width; canvas.height = height;
+                canvas.getContext('2d').drawImage(img, 0, 0, width, height);
+                resolve(canvas.toDataURL('image/jpeg', 0.6)); 
+              };
+              img.src = event.target.result;
+            };
+            reader.readAsDataURL(file);
+          });
+        });
+        Promise.all(promises).then(imgs => setFormData(prev => ({ ...prev, images: [...prev.images, ...imgs] })));
+      };
+
+      const removeImage = (index) => setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
+
+      const handleSubmit = () => {
+        if (!formData.pair) { alert("通貨ペアを入力してください"); return; }
+        setRecords([{ ...formData, id: Date.now() }, ...records]);
+        setFormData({ ...initialFormState, date: formData.date, dateEnd: formData.dateEnd, pair: formData.pair });
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      const deleteRecord = (id) => { if(window.confirm("削除してもよろしいですか？")) setRecords(records.filter(r => r.id !== id)); };
+
+      const exportAsText = (record) => {
+        const text = `=========================================
+      FXデイトレード反省ノート
+=========================================
+【基本情報】
+・エントリー : ${record.date} ${record.timeStart}
+・決済       : ${record.dateEnd} ${record.timeEnd}
+・保有時間   : ${record.holdDays}日 ${record.holdHours}時間 ${record.holdMinutes}分
+・通貨ペア   : ${record.pair} (${record.side}) - ${record.lot} Lot
+・結果       : ${record.result} / ${record.profit ? record.profit + ' 円' : '---'} / ${record.pips ? record.pips + ' pips' : '---'}
+
+【1. エントリー前の確認】
+・方向感     : 日足(${record.dirDaily}) / 4h足(${record.dir4h}) / 1h足(${record.dir1h})
+・スタイル   : ${record.trendType === 'その他' ? record.trendTypeOther : record.trendType}
+・波数       : ${record.wave === 'その他' ? record.waveOther : '第' + record.wave + '波'}
+・最後のPA   : ${record.lastPA === 'その他' ? record.lastPAOther : record.lastPA}
+・エントリー : ${record.priceEntry}
+・SL (損切)  : ${record.priceSl} (リスク: ${record.riskPips} pips)
+・TP (利確)  : ${record.priceTp} (リワード: ${record.rewardPips} pips)
+・自信(1〜9) : ${record.confidence}
+・逆行の根拠 : 
+${record.reversalReason}
+
+【2〜4. 実行・心理・結果】
+・タイミング : ${record.entryTiming}
+・行動チェック:
+  [${record.chkSlTp ? 'x' : ' '}] SLやTPを途中で広げたり外したりしなかった
+  ${record.chkActionOther ? `[x] その他行動: ${record.actionOtherText}` : ''}
+・決済チェック:
+  [${record.chkCut ? 'x' : ' '}] (負け) ためらわずに損切りできた
+  [${record.chkChicken ? 'x' : ' '}] (勝ち) チキン利食いをしなかった
+  [${record.chkGreed ? 'x' : ' '}] 欲張って利確のタイミングを逃さなかった
+  [${record.chkReversal ? 'x' : ' '}] 逆行の根拠が現実になった際、撤退できた
+  ${record.chkExitOther ? `[x] その他結果: ${record.exitOtherText}` : ''}
+
+【5. 総合評価と自己分析】
+・メンタル評価 : ${record.mental}
+・勝因/敗因  : 
+${record.analysis}
+
+・改善点     : 
+${record.improvement}
+
+・その他メモ : 
+${record.reviewOtherText}
+=========================================`;
+        const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `FX反省_${record.date}_${record.pair}.txt`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      };
+
+      return (
+        <div className="max-w-2xl mx-auto p-4">
+          <h1 className="text-2xl font-bold text-center text-blue-700 mb-6"><i className="fas fa-book-open mr-2"></i>FX 反省ノート</h1>
+          
+          <div className="bg-white p-6 rounded-xl shadow-md mb-8">
+            <h2 className="text-lg font-bold mb-4 border-b pb-2 text-blue-800">【基本情報】</h2>
+            <div className="grid grid-cols-2 gap-4">
+              <InputField label="エントリー日" type="date" name="date" value={formData.date} onChange={handleChange} />
+              <InputField label="時間" type="time" name="timeStart" value={formData.timeStart} onChange={handleChange} />
+              <InputField label="決済日" type="date" name="dateEnd" value={formData.dateEnd} onChange={handleChange} />
+              <InputField label="決済時間" type="time" name="timeEnd" value={formData.timeEnd} onChange={handleChange} />
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              <InputField label="保有(日)" type="number" name="holdDays" value={formData.holdDays} onChange={handleChange} />
+              <InputField label="保有(時間)" type="number" name="holdHours" value={formData.holdHours} onChange={handleChange} />
+              <InputField label="保有(分)" type="number" name="holdMinutes" value={formData.holdMinutes} onChange={handleChange} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <InputField label="通貨ペア" name="pair" value={formData.pair} onChange={handleChange} placeholder="例: USD/JPY" />
+              <InputField label="Lot数" type="number" name="lot" value={formData.lot} onChange={handleChange} />
+            </div>
+            <ButtonGroup label="売買" name="side" options={['買', '売']} value={formData.side} onChange={handleChange} />
+            <ButtonGroup label="結果" name="result" options={['勝', '負', '分']} value={formData.result} onChange={handleChange} />
+            <div className="grid grid-cols-2 gap-4">
+              <InputField label="損益(pips)" type="number" name="pips" value={formData.pips} onChange={handleChange} />
+              <InputField label="損益(円)" type="number" name="profit" value={formData.profit} onChange={handleChange} />
+            </div>
+
+            <h2 className="text-lg font-bold mt-6 mb-4 border-b pb-2 text-blue-800">【1. エントリー前の確認】</h2>
+            <div className="flex gap-4">
+              <ButtonGroup label="日足" name="dirDaily" options={['上', '下', '横']} value={formData.dirDaily} onChange={handleChange} />
+              <ButtonGroup label="4h足" name="dir4h" options={['上', '下', '横']} value={formData.dir4h} onChange={handleChange} />
+              <ButtonGroup label="1h足" name="dir1h" options={['上', '下', '横']} value={formData.dir1h} onChange={handleChange} />
+            </div>
+            <ButtonGroup label="スタイル" name="trendType" options={['順', '逆', 'レンジ', 'その他']} value={formData.trendType} onChange={handleChange} />
+            {formData.trendType === 'その他' && <InputField name="trendTypeOther" value={formData.trendTypeOther} onChange={handleChange} placeholder="その他のスタイル" />}
+            
+            <ButtonGroup label="波数" name="wave" options={['1', '2', '3', '4', '5', 'その他']} value={formData.wave} onChange={handleChange} />
+            {formData.wave === 'その他' && <InputField name="waveOther" value={formData.waveOther} onChange={handleChange} placeholder="その他の波数" />}
+            
+            <ButtonGroup label="最後のPA" name="lastPA" options={['三尊', '逆三尊', 'Wトップ', 'Wボトム', 'その他']} value={formData.lastPA} onChange={handleChange} />
+            {formData.lastPA === 'その他' && <InputField name="lastPAOther" value={formData.lastPAOther} onChange={handleChange} placeholder="その他のPA" />}
+
+            <div className="grid grid-cols-3 gap-2">
+              <InputField label="Entry価格" name="priceEntry" value={formData.priceEntry} onChange={handleChange} />
+              <InputField label="SL価格" name="priceSl" value={formData.priceSl} onChange={handleChange} />
+              <InputField label="TP価格" name="priceTp" value={formData.priceTp} onChange={handleChange} />
+            </div>
+            <div className="grid grid-cols-2 gap-4">
+              <InputField label="リスク(pips)" type="number" name="riskPips" value={formData.riskPips} onChange={handleChange} />
+              <InputField label="リワード(pips)" type="number" name="rewardPips" value={formData.rewardPips} onChange={handleChange} />
+            </div>
+            
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">自信 (1〜9)</label>
+              <input type="range" min="1" max="9" value={formData.confidence} onChange={(e) => handleChange('confidence', e.target.value)} className="w-full" />
+              <div className="text-center text-lg font-bold text-blue-600">{formData.confidence}</div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">逆行の根拠</label>
+              <textarea className="w-full p-2.5 border rounded-lg" rows="2" value={formData.reversalReason} onChange={(e) => handleChange('reversalReason', e.target.value)}></textarea>
+            </div>
+
+            <h2 className="text-lg font-bold mt-6 mb-4 border-b pb-2 text-blue-800">【2〜4. 実行・心理・結果】</h2>
+            <ButtonGroup label="タイミング" name="entryTiming" options={['早', '良', '遅']} value={formData.entryTiming} onChange={handleChange} />
+            
+            <p className="text-sm font-semibold text-gray-700 mb-2 mt-4">行動チェック</p>
+            <CheckboxItem label="SLやTPを途中で広げたり外したりしなかった" name="chkSlTp" checked={formData.chkSlTp} onChange={handleChange} />
+            <CheckboxItem label="その他" name="chkActionOther" checked={formData.chkActionOther} onChange={handleChange} />
+            {formData.chkActionOther && <InputField name="actionOtherText" value={formData.actionOtherText} onChange={handleChange} placeholder="その他の行動" />}
+
+            <p className="text-sm font-semibold text-gray-700 mb-2 mt-4">決済チェック</p>
+            <CheckboxItem label="(負け) ためらわずに損切りできた" name="chkCut" checked={formData.chkCut} onChange={handleChange} />
+            <CheckboxItem label="(勝ち) チキン利食いをしなかった" name="chkChicken" checked={formData.chkChicken} onChange={handleChange} />
+            <CheckboxItem label="欲張って利確のタイミングを逃さなかった" name="chkGreed" checked={formData.chkGreed} onChange={handleChange} />
+            <CheckboxItem label="逆行の根拠が現実になった際、撤退できた" name="chkReversal" checked={formData.chkReversal} onChange={handleChange} />
+            <CheckboxItem label="その他" name="chkExitOther" checked={formData.chkExitOther} onChange={handleChange} />
+            {formData.chkExitOther && <InputField name="exitOtherText" value={formData.exitOtherText} onChange={handleChange} placeholder="その他の結果" />}
+
+            <h2 className="text-lg font-bold mt-6 mb-4 border-b pb-2 text-blue-800">【5. 総合評価と自己分析】</h2>
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">メンタル評価 (1:乱れ 〜 5:冷静)</label>
+              <input type="range" min="1" max="5" value={formData.mental} onChange={(e) => handleChange('mental', e.target.value)} className="w-full" />
+              <div className="text-center text-lg font-bold text-blue-600">{formData.mental}</div>
+            </div>
+
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">勝因・敗因の分析</label>
+              <textarea className="w-full p-2.5 border rounded-lg" rows="3" value={formData.analysis} onChange={(e) => handleChange('analysis', e.target.value)}></textarea>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">次への改善点</label>
+              <textarea className="w-full p-2.5 border rounded-lg" rows="2" value={formData.improvement} onChange={(e) => handleChange('improvement', e.target.value)}></textarea>
+            </div>
+            <div className="mb-4">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">その他メモ</label>
+              <textarea className="w-full p-2.5 border rounded-lg" rows="2" value={formData.reviewOtherText} onChange={(e) => handleChange('reviewOtherText', e.target.value)}></textarea>
+            </div>
+
+            <div className="mb-6">
+              <label className="block text-sm font-semibold text-gray-700 mb-2">チャート画像</label>
+              <input type="file" accept="image/*" multiple onChange={handleImageUpload} className="text-sm mb-2" />
+              <div className="flex gap-2 overflow-x-auto">
+                {formData.images.map((img, idx) => (
+                  <div key={idx} className="relative inline-block">
+                    <img src={img} alt="chart" className="h-20 w-20 object-cover rounded border" />
+                    <button onClick={() => removeImage(idx)} className="absolute -top-2 -right-2 bg-red-500 text-white rounded-full w-6 h-6 flex items-center justify-center text-xs font-bold">&times;</button>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <button onClick={handleSubmit} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-lg shadow transition-colors text-lg">
+              記録を保存する
+            </button>
+          </div>
+
+          <div>
+            <h2 className="text-lg font-bold mb-4 border-b pb-2">過去の記録</h2>
+            {records.length === 0 ? <p className="text-gray-500 text-center">記録がありません</p> : 
+              records.map(record => (
+                <div key={record.id} className="bg-white p-4 rounded-xl shadow mb-4 border-l-4 border-blue-500">
+                  <div className="flex justify-between items-start mb-2">
+                    <div className="font-bold text-lg">{record.date} - {record.pair}</div>
+                    <div className={`px-2 py-1 rounded text-white text-xs font-bold ${record.result === '勝' ? 'bg-red-500' : record.result === '負' ? 'bg-blue-500' : 'bg-gray-500'}`}>
+                      {record.result}
+                    </div>
+                  </div>
+                  <div className="text-sm text-gray-600 mb-2">
+                    {record.side} / {record.pips ? `${record.pips} pips` : '-'} / {record.profit ? `${record.profit} 円` : '-'}
+                  </div>
+                  <div className="flex gap-2 mt-4">
+                    <button onClick={() => exportAsText(record)} className="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded font-bold"><i className="fas fa-file-export mr-1"></i>テキスト出力</button>
+                    <button onClick={() => deleteRecord(record.id)} className="text-xs bg-red-100 text-red-600 hover:bg-red-200 px-3 py-2 rounded font-bold"><i className="fas fa-trash mr-1"></i>削除</button>
+                  </div>
+                </div>
+              ))
+            }
+          </div>
+        </div>
+      );
+    }
+
+    const root = ReactDOM.createRoot(document.getElementById('root'));
+    root.render(<App />);
+  </script>
+</body>
+</html>
