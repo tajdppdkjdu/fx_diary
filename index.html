@@ -68,11 +68,13 @@
     function App() {
       const getToday = () => new Date().toISOString().split('T')[0];
 
+      // 初期状態の定義（ダウとの一致を追加）
       const initialFormState = {
         date: getToday(), timeStart: '', dateEnd: getToday(), timeEnd: '',
         holdDays: '', holdHours: '', holdMinutes: '',
         pair: '', lot: '', side: '買', result: '勝', profit: '', pips: '',
         dirDaily: '上', dir4h: '上', dir1h: '上',
+        dowDaily: '〇', dow4h: '〇', dow1h: '〇', // 追加: ダウとの一致
         trendType: '順', trendTypeOther: '', wave: '1', waveOther: '', lastPA: '三尊', lastPAOther: '',
         priceEntry: '', priceSl: '', priceTp: '', riskPips: '', rewardPips: '',
         reversalReason: '', confidence: '5', images: [],
@@ -85,6 +87,7 @@
       const [formData, setFormData] = useState(initialFormState);
       const [records, setRecords] = useState([]);
       const [isLoaded, setIsLoaded] = useState(false);
+      const [editingId, setEditingId] = useState(null); // 追加: 編集中のデータIDを記憶する
 
       useEffect(() => {
         localforage.getItem('fx-trade-records').then(val => {
@@ -126,11 +129,40 @@
 
       const removeImage = (index) => setFormData(prev => ({ ...prev, images: prev.images.filter((_, i) => i !== index) }));
 
-      const handleSubmit = () => {
-        if (!formData.pair) { alert("通貨ペアを入力してください"); return; }
-        setRecords([{ ...formData, id: Date.now() }, ...records]);
-        setFormData({ ...initialFormState, date: formData.date, dateEnd: formData.dateEnd, pair: formData.pair });
+      // 保存処理（isDraft: 下書きかどうかを受け取る）
+      const handleSave = (isDraft) => {
+        if (!formData.pair && !isDraft) { 
+          alert("記録を完了するには、通貨ペアを入力してください"); 
+          return; 
+        }
+
+        const newRecordData = { ...formData, isDraft };
+
+        if (editingId) {
+          // 既存の記録を上書き
+          setRecords(records.map(r => r.id === editingId ? { ...newRecordData, id: editingId } : r));
+          setEditingId(null);
+        } else {
+          // 新規記録として追加
+          setRecords([{ ...newRecordData, id: Date.now() }, ...records]);
+        }
+
+        // フォームをリセット
+        setFormData({ ...initialFormState, date: getToday(), dateEnd: getToday() });
         window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      // 編集モードに入る処理
+      const editRecord = (record) => {
+        setFormData(record);
+        setEditingId(record.id);
+        window.scrollTo({ top: 0, behavior: 'smooth' });
+      };
+
+      // 編集をキャンセルする処理
+      const cancelEdit = () => {
+        setFormData({ ...initialFormState, date: getToday(), dateEnd: getToday() });
+        setEditingId(null);
       };
 
       const deleteRecord = (id) => { if(window.confirm("削除してもよろしいですか？")) setRecords(records.filter(r => r.id !== id)); };
@@ -140,6 +172,7 @@
       FXデイトレード反省ノート
 =========================================
 【基本情報】
+・ステータス : ${record.isDraft ? '下書き' : '完了'}
 ・エントリー : ${record.date} ${record.timeStart}
 ・決済       : ${record.dateEnd} ${record.timeEnd}
 ・保有時間   : ${record.holdDays}日 ${record.holdHours}時間 ${record.holdMinutes}分
@@ -148,6 +181,7 @@
 
 【1. エントリー前の確認】
 ・方向感     : 日足(${record.dirDaily}) / 4h足(${record.dir4h}) / 1h足(${record.dir1h})
+・ダウ一致   : 日足(${record.dowDaily}) / 4h足(${record.dow4h}) / 1h足(${record.dow1h})
 ・スタイル   : ${record.trendType === 'その他' ? record.trendTypeOther : record.trendType}
 ・波数       : ${record.wave === 'その他' ? record.waveOther : '第' + record.wave + '波'}
 ・最後のPA   : ${record.lastPA === 'その他' ? record.lastPAOther : record.lastPA}
@@ -196,8 +230,10 @@ ${record.reviewOtherText}
         <div className="max-w-2xl mx-auto p-4">
           <h1 className="text-2xl font-bold text-center text-blue-700 mb-6"><i className="fas fa-book-open mr-2"></i>FX 反省ノート</h1>
           
-          <div className="bg-white p-6 rounded-xl shadow-md mb-8">
-            <h2 className="text-lg font-bold mb-4 border-b pb-2 text-blue-800">【基本情報】</h2>
+          <div className={`p-6 rounded-xl shadow-md mb-8 ${editingId ? 'bg-blue-50 border-2 border-blue-400' : 'bg-white'}`}>
+            <h2 className="text-lg font-bold mb-4 border-b pb-2 text-blue-800">
+              {editingId ? "【編集中】の記録" : "【基本情報】新規入力"}
+            </h2>
             <div className="grid grid-cols-2 gap-4">
               <InputField label="エントリー日" type="date" name="date" value={formData.date} onChange={handleChange} />
               <InputField label="時間" type="time" name="timeStart" value={formData.timeStart} onChange={handleChange} />
@@ -214,7 +250,10 @@ ${record.reviewOtherText}
               <InputField label="Lot数" type="number" name="lot" value={formData.lot} onChange={handleChange} />
             </div>
             <ButtonGroup label="売買" name="side" options={['買', '売']} value={formData.side} onChange={handleChange} />
-            <ButtonGroup label="結果" name="result" options={['勝', '負', '分']} value={formData.result} onChange={handleChange} />
+            
+            {/* 結果に「試」を追加 */}
+            <ButtonGroup label="結果" name="result" options={['勝', '負', '分', '試']} value={formData.result} onChange={handleChange} />
+            
             <div className="grid grid-cols-2 gap-4">
               <InputField label="損益(pips)" type="number" name="pips" value={formData.pips} onChange={handleChange} />
               <InputField label="損益(円)" type="number" name="profit" value={formData.profit} onChange={handleChange} />
@@ -222,10 +261,19 @@ ${record.reviewOtherText}
 
             <h2 className="text-lg font-bold mt-6 mb-4 border-b pb-2 text-blue-800">【1. エントリー前の確認】</h2>
             <div className="flex gap-4">
-              <ButtonGroup label="日足" name="dirDaily" options={['上', '下', '横']} value={formData.dirDaily} onChange={handleChange} />
-              <ButtonGroup label="4h足" name="dir4h" options={['上', '下', '横']} value={formData.dir4h} onChange={handleChange} />
-              <ButtonGroup label="1h足" name="dir1h" options={['上', '下', '横']} value={formData.dir1h} onChange={handleChange} />
+              <ButtonGroup label="日足(方向)" name="dirDaily" options={['上', '下', '横']} value={formData.dirDaily} onChange={handleChange} />
+              <ButtonGroup label="4h足(方向)" name="dir4h" options={['上', '下', '横']} value={formData.dir4h} onChange={handleChange} />
+              <ButtonGroup label="1h足(方向)" name="dir1h" options={['上', '下', '横']} value={formData.dir1h} onChange={handleChange} />
             </div>
+
+            {/* 追加: ダウとの一致 */}
+            <h3 className="text-sm font-semibold text-gray-700 mt-2 mb-2">ダウとの一致</h3>
+            <div className="flex gap-4 mb-4">
+              <ButtonGroup label="日足" name="dowDaily" options={['〇', '×']} value={formData.dowDaily} onChange={handleChange} />
+              <ButtonGroup label="4h足" name="dow4h" options={['〇', '×']} value={formData.dow4h} onChange={handleChange} />
+              <ButtonGroup label="1h足" name="dow1h" options={['〇', '×']} value={formData.dow1h} onChange={handleChange} />
+            </div>
+
             <ButtonGroup label="スタイル" name="trendType" options={['順', '逆', 'レンジ', 'その他']} value={formData.trendType} onChange={handleChange} />
             {formData.trendType === 'その他' && <InputField name="trendTypeOther" value={formData.trendTypeOther} onChange={handleChange} placeholder="その他のスタイル" />}
             
@@ -305,28 +353,47 @@ ${record.reviewOtherText}
               </div>
             </div>
 
-            <button onClick={handleSubmit} className="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 px-4 rounded-lg shadow transition-colors text-lg">
-              記録を保存する
-            </button>
+            {/* 保存ボタンを分割 */}
+            <div className="flex gap-3">
+              <button onClick={() => handleSave(true)} className="w-1/3 bg-orange-400 hover:bg-orange-500 text-white font-bold py-3 px-2 rounded-lg shadow transition-colors text-sm">
+                下書き保存
+              </button>
+              <button onClick={() => handleSave(false)} className="w-2/3 bg-blue-600 hover:bg-blue-700 text-white font-bold py-3 px-4 rounded-lg shadow transition-colors text-lg">
+                {editingId ? "変更を完了する" : "記録を完了する"}
+              </button>
+            </div>
+            {editingId && (
+              <button onClick={cancelEdit} className="w-full mt-4 text-gray-500 underline text-sm text-center">
+                編集をキャンセルして新規入力に戻る
+              </button>
+            )}
           </div>
 
           <div>
             <h2 className="text-lg font-bold mb-4 border-b pb-2">過去の記録</h2>
             {records.length === 0 ? <p className="text-gray-500 text-center">記録がありません</p> : 
               records.map(record => (
-                <div key={record.id} className="bg-white p-4 rounded-xl shadow mb-4 border-l-4 border-blue-500">
+                <div key={record.id} className={`p-4 rounded-xl shadow mb-4 border-l-4 ${record.isDraft ? 'bg-orange-50 border-orange-400' : 'bg-white border-blue-500'}`}>
                   <div className="flex justify-between items-start mb-2">
-                    <div className="font-bold text-lg">{record.date} - {record.pair}</div>
-                    <div className={`px-2 py-1 rounded text-white text-xs font-bold ${record.result === '勝' ? 'bg-red-500' : record.result === '負' ? 'bg-blue-500' : 'bg-gray-500'}`}>
+                    <div className="font-bold text-lg flex items-center flex-wrap gap-2">
+                      {record.isDraft && <span className="bg-orange-500 text-white px-2 py-0.5 rounded text-xs">下書き</span>}
+                      {record.date} - {record.pair || '未入力'}
+                    </div>
+                    {/* 結果ごとの色分け */}
+                    <div className={`px-2 py-1 rounded text-white text-xs font-bold whitespace-nowrap
+                      ${record.result === '勝' ? 'bg-red-500' : 
+                        record.result === '負' ? 'bg-blue-500' : 
+                        record.result === '試' ? 'bg-green-500' : 'bg-gray-500'}`}>
                       {record.result}
                     </div>
                   </div>
                   <div className="text-sm text-gray-600 mb-2">
                     {record.side} / {record.pips ? `${record.pips} pips` : '-'} / {record.profit ? `${record.profit} 円` : '-'}
                   </div>
-                  <div className="flex gap-2 mt-4">
-                    <button onClick={() => exportAsText(record)} className="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded font-bold"><i className="fas fa-file-export mr-1"></i>テキスト出力</button>
-                    <button onClick={() => deleteRecord(record.id)} className="text-xs bg-red-100 text-red-600 hover:bg-red-200 px-3 py-2 rounded font-bold"><i className="fas fa-trash mr-1"></i>削除</button>
+                  <div className="flex gap-2 mt-4 flex-wrap">
+                    <button onClick={() => editRecord(record)} className="text-xs bg-blue-100 text-blue-700 hover:bg-blue-200 px-3 py-2 rounded font-bold"><i className="fas fa-edit mr-1"></i>編集</button>
+                    <button onClick={() => exportAsText(record)} className="text-xs bg-gray-200 hover:bg-gray-300 px-3 py-2 rounded font-bold"><i className="fas fa-file-export mr-1"></i>出力</button>
+                    <button onClick={() => deleteRecord(record.id)} className="text-xs bg-red-100 text-red-600 hover:bg-red-200 px-3 py-2 rounded font-bold ml-auto"><i className="fas fa-trash mr-1"></i>削除</button>
                   </div>
                 </div>
               ))
